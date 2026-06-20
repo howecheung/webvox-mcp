@@ -1,4 +1,5 @@
 ﻿zhipuai>=2.0.0
+sniffio>=1.3.0
 requests>=2.31.0
 beautifulsoup4>=4.12.3
 websockets>=12.0
