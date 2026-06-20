@@ -1,0 +1,14 @@
+services:
+  webvox-mcp:
+    image: ghcr.io/howecheung/webvox-mcp:0.0.1
+    container_name: webvox-mcp
+    environment:
+      - MCP_ENDPOINT=${MCP_ENDPOINT}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY}
+    restart: unless-stopped
+    network_mode: bridge
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

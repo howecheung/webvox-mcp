@@ -1,0 +1,22 @@
+#!/bin/bash
+# WebVox-MCP 生命周期管理脚本
+# Docker 应用的 start/stop 由应用中心通过 compose 自动管理
+
+case $1 in
+start)
+    exit 0
+    ;;
+stop)
+    exit 0
+    ;;
+status)
+    if docker inspect webvox-mcp 2>/dev/null | grep -q '"Status": "running"'; then
+        exit 0
+    else
+        exit 3
+    fi
+    ;;
+*)
+    exit 1
+    ;;
+esac

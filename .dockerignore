@@ -1,0 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+dist/
+build/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# Docs
+README.md
+
+# FPK (not needed in Docker image)
+fpk/
+
+# Environment
+.env
+.env.local
