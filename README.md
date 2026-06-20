@@ -53,6 +53,12 @@ python mcp_pipe.py 联网查询.py
   {"success": true, "results": [{"title": "...", "content": "...", "url": "..."}]}
 ```
 
+## 项目来源与致谢
+
+本项目基于小智AI团队的 MCP 服务教程，深表感谢 🙏
+
+📖 参考文档：[小智AI · MCP服务接入指南](https://my.feishu.cn/docx/JKFXd8bLYo6YZtxz9ORcbnA8nbe)
+
 ## 项目结构
 
 ```
