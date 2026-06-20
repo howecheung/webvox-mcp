@@ -1,0 +1,27 @@
+# 环境变量 / 本地配置
+.env
+.env.local
+config.json
+*.local.json
+
+# 用户级密钥文件
+.xiaozhi_mcp_config.json
+
+# 日志
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+Thumbs.db
