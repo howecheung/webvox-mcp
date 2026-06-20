@@ -10,13 +10,59 @@
 
 ## 快速开始
 
-### 1. 安装依赖
+### 🐳 Docker 部署（推荐，NAS / 服务器首选）
+
+```bash
+# 1. 创建项目目录
+mkdir -p ~/webvox-mcp && cd ~/webvox-mcp
+
+# 2. 下载项目文件
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/Dockerfile
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/docker-compose.yaml
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/docker-entrypoint.sh
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/mcp_pipe.py
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/联网查询.py
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/config_manager.py
+curl -O https://raw.githubusercontent.com/howecheung/webvox-mcp/master/requirements.txt
+
+# 3. 创建 .env 文件，填入你的密钥
+cat > .env << 'EOF'
+MCP_ENDPOINT=wss://api.xiaozhi.me/mcp/?token=你的小智MCP端点token
+ZHIPU_API_KEY=你的智谱API密钥
+EOF
+
+# 4. 构建并启动
+docker compose up -d
+
+# 5. 查看日志确认运行状态
+docker logs -f webvox-mcp
+
+# 常用管理命令
+docker compose restart        # 重启服务
+docker compose down           # 停止并删除容器
+docker compose up -d          # 重新启动
+docker compose pull           # 更新镜像
+```
+
+> 💡 如果 NAS 无法直接访问 GitHub，可在电脑下载文件后通过 SMB/FTP 传到 NAS 的 `~/webvox-mcp/` 目录，再执行 `docker compose up -d`。
+
+---
+
+### 🪟 Windows 桌面
+
+下载 [Release 页](https://github.com/howecheung/webvox-mcp/releases) 的 `webvox-mcp.exe`，双击运行 GUI 配置面板。
+
+---
+
+### 🐍 源码运行
+
+#### 1. 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 配置密钥
+#### 2. 配置密钥
 
 打开 GUI 配置面板：
 
@@ -30,7 +76,7 @@ python 启动_main.py
 
 > 配置保存在 `~/.xiaozhi_mcp_config.json`，不会被提交到 Git。
 
-### 3. 启动服务
+#### 3. 启动服务
 
 点击"启动服务"，或在命令行：
 
