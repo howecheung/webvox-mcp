@@ -9,4 +9,6 @@ maintainer            = howecheung
 maintainer_url        = https://github.com/howecheung/webvox-mcp
 distributor           = howecheung
 distributor_url       = https://github.com/howecheung/webvox-mcp
+service_port          = 0
 checkport             = false
+disable_authorization_path = true
