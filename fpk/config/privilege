@@ -1,7 +1,0 @@
-{
-    "defaults": {
-        "run-as": "package"
-    },
-    "username": "docker-webvox-mcp",
-    "groupname": "docker-webvox-mcp"
-}

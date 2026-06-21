@@ -18,9 +18,6 @@ build/
 # Docs
 README.md
 
-# FPK (not needed in Docker image)
-fpk/
-
 # Environment
 .env
 .env.local
