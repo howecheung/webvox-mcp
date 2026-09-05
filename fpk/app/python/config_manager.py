@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""读取/保存“小智联网查询MCP”配置文件。
+"""读取/保存“联网查询MCP”配置文件。
 
 配置文件默认位于 $HOME/.xiaozhi_mcp_config.json（容器内 HOME=/config，
 对应宿主机 @appdata/webvox-mcp/var）。旧版只含 MCP_ENDPOINT/ZHIPU_API_KEY

@@ -4,7 +4,7 @@
     "items": [
       {
         "type": "tips",
-        "helpText": "小智联网查询MCP 为语音机器人提供联网搜索能力。首次启动需要从 ghcr.io 拉取镜像，请确保 NAS 可以访问外网。"
+        "helpText": "联网查询MCP 为语音机器人提供联网搜索能力。首次启动需要从 ghcr.io 拉取镜像，请确保 NAS 可以访问外网。"
       },
       {
         "type": "tips",

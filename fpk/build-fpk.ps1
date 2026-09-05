@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = $PSScriptRoot
 $DistDir = Join-Path $ProjectRoot "dist"
 
-# fnpack 查找顺序：FNPACK 环境变量 > PATH > 开发机上 .fpk-refs/bin 的本地副本
+# fnpack lookup: $env:FNPACK > PATH > local dev copy under .fpk-refs/bin
 $Fnpack = $null
 if ($env:FNPACK) {
   $Fnpack = $env:FNPACK
@@ -18,7 +18,7 @@ else {
   }
 }
 if (-not $Fnpack -or -not (Test-Path -LiteralPath $Fnpack)) {
-  throw "未找到 fnpack。请从 fnOS 开发者官网下载 fnpack 并放入 PATH，或用 FNPACK 环境变量指定路径。"
+  throw "fnpack not found. Put it on PATH or set the FNPACK environment variable."
 }
 
 New-Item -ItemType Directory -Force $DistDir | Out-Null
@@ -27,23 +27,23 @@ Push-Location $DistDir
 try {
   & $Fnpack build -d $ProjectRoot
   if ($LASTEXITCODE -ne 0) {
-    throw "fnpack build 失败，退出码 $LASTEXITCODE"
+    throw "fnpack build failed with exit code $LASTEXITCODE"
   }
-  # 同时生成带版本号的提交/发布产物，例如 webvox-mcp-1.6.0.fpk
+  # Also produce a versioned artifact such as webvox-mcp-1.6.0.fpk
   $Version = [regex]::Match(
     (Get-Content -LiteralPath (Join-Path $ProjectRoot "manifest") -Raw),
     '(?m)^version\s*=\s*([0-9.]+)\s*$'
   ).Groups[1].Value
   if (-not $Version) {
-    throw "无法从 manifest 解析 version"
+    throw "Unable to parse version from manifest"
   }
   $Named = Join-Path $ProjectRoot "webvox-mcp-$Version.fpk"
   Copy-Item -LiteralPath (Join-Path $DistDir "webvox-mcp.fpk") -Destination $Named -Force
-  Write-Host "带版本号产物已生成：$Named"
+  Write-Host "Versioned artifact generated: $Named"
 }
 finally {
   Pop-Location
 }
 
 Write-Host ""
-Write-Host "FPK 已生成：$DistDir\webvox-mcp.fpk"
+Write-Host "FPK generated: $DistDir\webvox-mcp.fpk"
