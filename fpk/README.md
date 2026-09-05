@@ -1,7 +1,7 @@
-# 小智联网查询MCP（WebVox-MCP）fnOS FPK 打包说明（v1.6.0）
+# 联网查询MCP（WebVox-MCP）fnOS FPK 打包说明（v1.6.0）
 
 本目录把 [howecheung/webvox-mcp](https://github.com/howecheung/webvox-mcp)
-封装成飞牛 fnOS `.fpk` 应用（显示名“小智联网查询MCP”）。
+封装成飞牛 fnOS `.fpk` 应用（显示名“联网查询MCP”）。
 
 > 版本区分：本目录是 **v1.6.0** 的完整可用的 fnOS FPK 工程，是对仓库历史中
 > 曾被移除的旧 `fpk/`（标注 abandoned、安装即报 env file not found）的完全重写。
@@ -12,9 +12,9 @@
 
 - **运行方式**：Docker Compose，使用上游官方多架构镜像
   `ghcr.io/howecheung/webvox-mcp`（按打包时 OCI 清单摘要固定），`platform=all`。
-- **安装后配置**：桌面上出现“小智联网查询MCP”和“小智联网查询MCP 运行日志”
-  两个图标，点击后都在 fnOS 系统页面内嵌打开（`iframe` 方式）：
-  配置页负责填服务商与密钥，日志页独立查看连接/运行日志。
+- **安装后配置**：桌面只出现一个“联网查询MCP”图标，点击后以 fnOS 系统页面
+  内嵌打开（`iframe` 方式）。页面顶部菜单在“配置 / 运行日志”之间切换，
+  不再生成第二个桌面应用图标。
 - **可选服务商**：
   - 阿里百炼 WebSearch MCP（默认，推荐）：连接百炼 MCP 广场的
     `https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp`。
@@ -33,7 +33,7 @@
 | `manifest` | 应用元数据（显示名、端口、桌面入口、changelog 等） |
 | `config/resource` | 声明 Docker Compose 项目 `webvox-mcp` |
 | `app/docker/docker-compose.yaml` | Compose 编排；把 `var` 挂到 `/config`、把 `python/` 挂到 `/app` |
-| `app/ui/config` + `app/ui/images` | fnOS 桌面入口（iframe）：配置页 `/` 与日志页 `/logs` |
+| `app/ui/config` + `app/ui/images` | fnOS 桌面入口（iframe）：仅“联网查询MCP”一个入口，指向 `/` |
 | `app/python/` | 覆盖进容器的业务代码与配置页服务 |
 | `cmd/` | 生命周期脚本（Docker 应用启停由应用中心按 compose 管理） |
 | `wizard/install` | 安装说明（无表单字段） |
@@ -45,7 +45,7 @@
 | --- | --- |
 | `service.py` | 配置页 HTTP 服务（8765）+ 桥接进程监督；配置保存后自动重启桥接 |
 | `www/index.html` | 配置页：MCP 端点、服务商卡片二选一、密钥、返回条数（含精简说明） |
-| `www/logs.html` | 独立运行日志页（3 秒自动刷新，尾随最新） |
+| `www/logs.html` | 运行日志页（供页内“运行日志”菜单与 `/logs` 直接访问，3 秒自动刷新） |
 | `service.py` | 同时提供配置接口 `/api/config` 与日志接口 `/api/logs` |
 | `mcp_pipe.py` | 小智 MCP WebSocket ↔ 本地 stdio MCP 双向管道（自动重连） |
 | `联网查询.py` | 对外暴露的 `联网查询` MCP 工具，按服务商分发 |
@@ -82,8 +82,9 @@ fnpack build --directory .
 
 1. 飞牛桌面 → 应用中心 → 手动安装，选择 `webvox-mcp-1.6.0.fpk`（或 `dist\webvox-mcp.fpk`）。
 2. 首次启动会拉取固定版本的 `ghcr.io/howecheung/webvox-mcp` 镜像，需 NAS 能访问外网。
-3. 点击桌面“小智联网查询MCP”图标：
+3. 点击桌面“联网查询MCP”图标（默认停在配置页）：
    - 填写小智 MCP 端点（`wss://api.xiaozhi.me/mcp/?token=...`）；
+   - 页面顶部菜单可切到“运行日志”查看连接状态；
    - 默认选中“阿里百炼 WebSearch MCP”，已开通则填百炼 `sk-` API Key，
      服务地址保持默认即可；改用智谱时切换到“智谱 GLM”并填智谱 API Key；
    - 保存后页面会自动重启 MCP 桥接进程并重连。

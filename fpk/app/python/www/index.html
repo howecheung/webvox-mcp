@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>小智联网查询MCP 配置</title>
+<title>联网查询MCP</title>
 <style>
   :root {
     --bg: #f4f6fb;
@@ -106,6 +106,26 @@
   .kv dt { color: var(--muted); }
   .kv dd { margin: 0; word-break: break-all; }
   .footnote { color: var(--muted); font-size: 12px; text-align: center; margin-top: 18px; }
+  .view-tabs { display: flex; gap: 4px; margin: 0 0 14px; border-bottom: 1px solid var(--border); }
+  .view-tab {
+    border: 0; border-bottom: 2px solid transparent; background: transparent;
+    padding: 9px 12px; font-size: 14px; font-weight: 600;
+    color: var(--muted); cursor: pointer;
+  }
+  .view-tab:hover { color: var(--text); }
+  .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls input { width: auto; }
+  #meta { margin-left: auto; font-size: 12px; color: var(--muted); }
+  pre.logs {
+    background: #0f172a; color: #cbd5e1; border-radius: 10px;
+    padding: 12px 14px; margin: 0;
+    font-family: Consolas, "Courier New", monospace; font-size: 12px;
+    line-height: 1.6; white-space: pre-wrap; word-break: break-all;
+    height: 52vh; min-height: 260px; overflow-y: auto;
+  }
+  pre.logs:empty::after { content: "暂无日志…"; color: #64748b; }
   .hidden { display: none; }
 </style>
 </head>
@@ -113,12 +133,17 @@
 <div class="wrap">
   <div class="top">
     <div>
-      <h1>小智联网查询MCP</h1>
+      <h1>联网查询MCP</h1>
       <p class="subtitle">StackChan / 小智语音机器人的实时联网搜索 MCP 服务</p>
     </div>
-    <a class="btn secondary" href="/logs">运行日志</a>
   </div>
 
+  <nav class="view-tabs" id="view-tabs" aria-label="页面菜单">
+    <button type="button" class="view-tab active" data-view="config">配置</button>
+    <button type="button" class="view-tab" data-view="logs">运行日志</button>
+  </nav>
+
+  <section id="view-config" class="view-panel">
   <details class="card help" open>
     <summary>配置说明</summary>
     <ol>
@@ -207,12 +232,31 @@
       <dt>WebSocket</dt><dd id="stat-ws">-</dd>
       <dt>提示</dt><dd id="stat-lasterr">-</dd>
     </dl>
-    <p class="hint" style="margin:10px 0 0">详细运行日志请打开“运行日志”页面。</p>
+    <p class="hint" style="margin:10px 0 0">详细运行日志请点上方“运行日志”菜单查看。</p>
   </div>
 
   <p class="footnote">
     配置保存在 NAS 的 @appdata/webvox-mcp/var/.xiaozhi_mcp_config.json
   </p>
+  </section>
+
+  <section id="view-logs" class="view-panel hidden">
+    <div class="card">
+      <div class="top">
+        <div>
+          <h2>运行日志</h2>
+          <p class="subtitle">服务启动、WebSocket 重连与搜索服务商调用记录</p>
+        </div>
+        <button class="btn" id="refresh-btn" type="button">刷新</button>
+      </div>
+      <div class="controls">
+        <label><input type="checkbox" id="auto-refresh" checked>自动刷新（3 秒）</label>
+        <label><input type="checkbox" id="auto-scroll" checked>跟随最新</label>
+        <span id="meta">尚未加载</span>
+      </div>
+    </div>
+    <pre class="logs" id="logbox"></pre>
+  </section>
 </div>
 
 <script>
@@ -413,8 +457,77 @@ $("config-form").addEventListener("submit", async (event) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// 页内菜单：配置 / 运行日志
+// ---------------------------------------------------------------------------
+
+let activeView = "config";
+let logTimer = null;
+
+const logbox = $("logbox");
+const logMeta = $("meta");
+const logAutoRefresh = $("auto-refresh");
+const logAutoScroll = $("auto-scroll");
+
+async function loadLogs() {
+  try {
+    const res = await fetch("/api/logs?lines=400");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    const stick = logAutoScroll.checked &&
+      (logbox.scrollHeight - logbox.scrollTop - logbox.clientHeight < 60);
+    logbox.textContent = lines.join("\n");
+    if (stick) logbox.scrollTop = logbox.scrollHeight;
+    logMeta.textContent = "共 " + lines.length + " 行 · " + new Date().toLocaleTimeString();
+  } catch (err) {
+    logMeta.textContent = "加载失败：" + (err.message || err);
+  }
+}
+
+function startLogTimer() {
+  if (logTimer) return;
+  logTimer = setInterval(() => {
+    if (logAutoRefresh.checked) loadLogs();
+  }, 3000);
+}
+
+function stopLogTimer() {
+  if (logTimer) {
+    clearInterval(logTimer);
+    logTimer = null;
+  }
+}
+
+function switchView(view) {
+  const target = view === "logs" ? "logs" : "config";
+  activeView = target;
+  $("view-config").classList.toggle("hidden", target !== "config");
+  $("view-logs").classList.toggle("hidden", target !== "logs");
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === target);
+  });
+  if (target === "logs") {
+    loadLogs();
+    startLogTimer();
+  } else {
+    stopLogTimer();
+  }
+}
+
+document.querySelectorAll(".view-tab").forEach((btn) => {
+  btn.addEventListener("click", () => switchView(btn.dataset.view));
+});
+$("refresh-btn").addEventListener("click", () => loadLogs());
+logAutoRefresh.addEventListener("change", () => {
+  if (logAutoRefresh.checked) loadLogs();
+});
+
 loadState(true, true);
-setInterval(() => loadState(true, false), 10000);
+switchView("config");
+setInterval(() => {
+  if (activeView === "config") loadState(true, false);
+}, 10000);
 </script>
 </body>
 </html>

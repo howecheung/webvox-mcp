@@ -1,21 +1,12 @@
 {
   ".url": {
     "webvox-mcp.main": {
-      "title": "小智联网查询MCP",
+      "title": "联网查询MCP",
       "icon": "images/icon_{0}.png",
       "type": "iframe",
       "protocol": "http",
       "port": "8765",
       "url": "/",
-      "allUsers": false
-    },
-    "webvox-mcp.logs": {
-      "title": "小智联网查询MCP 运行日志",
-      "icon": "images/icon_{0}.png",
-      "type": "iframe",
-      "protocol": "http",
-      "port": "8765",
-      "url": "/logs",
       "allUsers": false
     }
   }

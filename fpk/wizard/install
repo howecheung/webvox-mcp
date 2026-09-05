@@ -8,7 +8,7 @@
       },
       {
         "type": "tips",
-        "helpText": "安装完成后，请点击桌面的“小智联网查询MCP”图标打开配置页面，填写小智 MCP 端点，选择默认推荐的阿里百炼 WebSearch MCP（或智谱 GLM）并填写对应 API Key。"
+        "helpText": "安装完成后，请点击桌面的“联网查询MCP”图标，在页面菜单中切到“配置”填写小智 MCP 端点，选择默认推荐的阿里百炼 WebSearch MCP（或智谱 GLM）并填写对应 API Key。"
       }
     ]
   }
