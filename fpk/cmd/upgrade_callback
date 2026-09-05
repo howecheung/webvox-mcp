@@ -1,0 +1,6 @@
+#!/bin/bash
+set -u
+
+# 配置由网页配置页写入 var/.xiaozhi_mcp_config.json，升级时保留
+mkdir -p "$TRIM_PKGVAR"
+exit 0

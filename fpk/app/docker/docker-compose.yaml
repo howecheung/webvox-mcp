@@ -1,0 +1,25 @@
+services:
+  webvox-mcp:
+    # 固定到打包当天 latest 的 OCI 多架构清单摘要；上游发布新版时需同步更新
+    image: ghcr.io/howecheung/webvox-mcp@sha256:d071e446558742d48bea92555beb6f7ff92670d9c9712011cfa82beb14928274
+    container_name: webvox-mcp
+    restart: unless-stopped
+    ports:
+      - "${TRIM_SERVICE_PORT}:8765"
+    # 容器代码由 FPK 自带的 app/python 覆盖（挂载到 /app），
+    # 因此无需为每个供应商重建 Docker 镜像。
+    entrypoint:
+      - /bin/sh
+      - /app/start.sh
+    environment:
+      - HOME=/config
+      - TZ=Asia/Shanghai
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - "${TRIM_PKGVAR}:/config"
+      - "${TRIM_APPDEST}/python:/app:ro"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

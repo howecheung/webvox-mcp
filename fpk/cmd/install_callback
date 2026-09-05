@@ -1,0 +1,7 @@
+#!/bin/bash
+set -u
+
+# 配置由网页配置页负责写入 var/.xiaozhi_mcp_config.json，
+# 此处仅确保持久数据目录存在。
+mkdir -p "$TRIM_PKGVAR"
+exit 0

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小智联网查询MCP 配置</title>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --border: #dde3ee;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --ok: #16a34a;
+    --warn: #d97706;
+    --err: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  .wrap { max-width: 760px; margin: 24px auto; padding: 0 16px 48px; }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  details.help summary { cursor: pointer; font-size: 14px; font-weight: 600; }
+  details.help ol { margin: 10px 0 6px; padding-left: 20px; font-size: 13px; }
+  details.help li { margin-bottom: 6px; }
+  code { background: #eef2f7; border-radius: 5px; padding: 1px 5px; font-size: 12px; }
+  .field { margin-bottom: 13px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  input[type=text], input[type=url], input[type=password], input[type=number], select {
+    width: 100%;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    background: #fff;
+    color: var(--text);
+  }
+  input:focus, select:focus { outline: 2px solid rgba(37,99,235,.2); border-color: var(--accent); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row .field { flex: 1 1 220px; }
+  .provider-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .provider-card {
+    position: relative;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 12px 10px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .provider-card:hover { border-color: #b8c4d8; }
+  .provider-card.selected {
+    border-color: var(--accent);
+    background: #f6f9ff;
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .provider-card input { position: absolute; opacity: 0; pointer-events: none; }
+  .provider-card .provider-name { display: block; font-size: 14px; font-weight: 700; }
+  .provider-card .provider-desc {
+    display: block; color: var(--muted); font-size: 12px; margin-top: 4px;
+  }
+  .provider-card .provider-badge { margin: 8px 0 0; }
+  .check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .check-row input { width: auto; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 9px 16px; border: 0; border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+    cursor: pointer; margin-right: 8px; text-decoration: none; white-space: nowrap;
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .btn.secondary { background: #eef2f7; color: var(--text); font-weight: 500; }
+  #status { margin-top: 10px; font-size: 13px; min-height: 20px; }
+  #status.ok { color: var(--ok); }
+  #status.err { color: var(--err); }
+  .badge {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; margin-left: 6px;
+  }
+  .badge.green { background: #e7f7ec; color: var(--ok); }
+  .badge.gray { background: #eef1f6; color: var(--muted); }
+  .badge.amber { background: #fdf1e1; color: var(--warn); }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  .footnote { color: var(--muted); font-size: 12px; text-align: center; margin-top: 18px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>小智联网查询MCP</h1>
+      <p class="subtitle">StackChan / 小智语音机器人的实时联网搜索 MCP 服务</p>
+    </div>
+    <a class="btn secondary" href="/logs">运行日志</a>
+  </div>
+
+  <details class="card help" open>
+    <summary>配置说明</summary>
+    <ol>
+      <li>MCP 服务地址：从 <strong>xiaozhi.me</strong> 控制台复制的 <code>wss://…?token=…</code> 整串地址。</li>
+      <li>服务商二选一：默认推荐阿里百炼 WebSearch MCP（需先在百炼 MCP 广场开通，前 2000 次免费）；用智谱则选智谱 GLM 并填对应 Key。</li>
+      <li>点“保存并重连”，再到“运行日志”查看连接情况。</li>
+    </ol>
+    <div class="hint">密钥/令牌不会明文回显或写日志；留空保存表示不改，勾选“清除”可删除已保存密钥。</div>
+  </details>
+
+  <form id="config-form" autocomplete="off">
+    <div class="card">
+      <h2>1 · 小智连接</h2>
+      <div class="field">
+        <label for="mcp_endpoint">MCP 服务地址</label>
+        <input type="text" id="mcp_endpoint"
+               placeholder="wss://api.xiaozhi.me/mcp/?token=你的token"
+               spellcheck="false">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2 · 搜索服务商</h2>
+      <div class="provider-grid" role="radiogroup" aria-label="搜索服务商">
+        <label class="provider-card selected" data-provider="bailian-mcp">
+          <input type="radio" name="provider" value="bailian-mcp" checked>
+          <span class="provider-name">阿里百炼 WebSearch MCP</span>
+          <span class="provider-desc">百炼 MCP 广场联网搜索 · 前 2000 次免费</span>
+          <span class="badge gray provider-badge" id="badge-bailian">未配置</span>
+        </label>
+        <label class="provider-card" data-provider="zhipu">
+          <input type="radio" name="provider" value="zhipu">
+          <span class="provider-name">智谱 GLM Web Search</span>
+          <span class="provider-desc">open.bigmodel.cn 搜索接口</span>
+          <span class="badge gray provider-badge" id="badge-zhipu">未配置</span>
+        </label>
+      </div>
+
+      <div class="field hidden" id="zhipu-key-row">
+        <label for="zhipu_key">智谱 API Key</label>
+        <input type="password" id="zhipu_key" autocomplete="new-password"
+               placeholder="输入智谱 API Key">
+        <div class="check-row">
+          <input type="checkbox" id="clear_zhipu_key">
+          <label for="clear_zhipu_key" style="font-weight:400; margin:0">清除已保存密钥</label>
+        </div>
+      </div>
+
+      <div class="field hidden" id="dashscope-key-row">
+        <label for="dashscope_key">阿里百炼 API Key</label>
+        <input type="password" id="dashscope_key" autocomplete="new-password"
+               placeholder="输入百炼 API Key（sk- 开头）">
+        <div class="check-row">
+          <input type="checkbox" id="clear_dashscope_key">
+          <label for="clear_dashscope_key" style="font-weight:400; margin:0">清除已保存密钥</label>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="field hidden" id="mcp-url-row">
+          <label for="mcp_url">WebSearch MCP 服务地址</label>
+          <input type="text" id="mcp_url"
+                 value="https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
+                 spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="result_count">默认返回条数</label>
+          <input type="number" id="result_count" min="1" max="50" value="8">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <button type="submit" class="btn" id="save-btn">保存并重连</button>
+      <button type="button" class="btn secondary" id="reload-btn">重新读取</button>
+      <div id="status"></div>
+    </div>
+  </form>
+
+  <div class="card">
+    <h2>运行状态 <span id="run-badge" class="badge gray">检测中</span></h2>
+    <dl class="kv">
+      <dt>MCP 端点</dt><dd id="stat-endpoint">未配置</dd>
+      <dt>服务商</dt><dd id="stat-provider">-</dd>
+      <dt>服务商 Key</dt><dd id="stat-key">-</dd>
+      <dt>WebSocket</dt><dd id="stat-ws">-</dd>
+      <dt>提示</dt><dd id="stat-lasterr">-</dd>
+    </dl>
+    <p class="hint" style="margin:10px 0 0">详细运行日志请打开“运行日志”页面。</p>
+  </div>
+
+  <p class="footnote">
+    配置保存在 NAS 的 @appdata/webvox-mcp/var/.xiaozhi_mcp_config.json
+  </p>
+</div>
+
+<script>
+"use strict";
+
+let state = null;
+let dirty = false;
+
+const $ = (id) => document.getElementById(id);
+
+function setStatus(text, ok) {
+  const el = $("status");
+  el.textContent = text || "";
+  el.className = ok ? "ok" : (text ? "err" : "");
+}
+
+async function fetchJson(url, options) {
+  const res = await fetch(url, options);
+  let data = null;
+  try { data = await res.json(); } catch (_) { data = {}; }
+  if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+  return data;
+}
+
+function providerText(p) {
+  if (p === "bailian-mcp") return "阿里百炼 WebSearch MCP";
+  return "智谱 GLM";
+}
+
+function currentProvider() {
+  const checked = document.querySelector('input[name="provider"]:checked');
+  return checked ? checked.value : "bailian-mcp";
+}
+
+function renderProviderBadges(s) {
+  const mark = (id, ready) => {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = ready ? "已配置" : "未配置";
+    el.className = "badge provider-badge " + (ready ? "green" : "gray");
+  };
+  mark("badge-bailian", !!(s && s.dashscopeKeySet));
+  mark("badge-zhipu", !!(s && s.zhipuKeySet));
+}
+
+function applyProviderUI(provider) {
+  const isZhipu = provider === "zhipu";
+  const isBailian = provider === "bailian-mcp";
+  $("zhipu-key-row").classList.toggle("hidden", !isZhipu);
+  $("dashscope-key-row").classList.toggle("hidden", !isBailian);
+  $("mcp-url-row").classList.toggle("hidden", !isBailian);
+  document.querySelectorAll(".provider-card").forEach((card) => {
+    card.classList.toggle("selected", card.dataset.provider === provider);
+  });
+}
+
+function renderForm(s) {
+  $("mcp_endpoint").value = s.endpoint || "";
+  const provider = s.provider || "bailian-mcp";
+  const radio = document.querySelector(
+    'input[name="provider"][value="' + provider + '"]'
+  );
+  if (radio) radio.checked = true;
+  $("mcp_url").value = s.dashscopeMcpUrl ||
+    "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp";
+  $("result_count").value = s.resultCount || 8;
+  $("zhipu_key").placeholder = s.zhipuKeySet ? "已保存（留空保持不变）" : "输入智谱 API Key";
+  $("dashscope_key").placeholder = s.dashscopeKeySet ? "已保存（留空保持不变）" : "输入百炼 API Key";
+  $("clear_zhipu_key").checked = false;
+  $("clear_dashscope_key").checked = false;
+  $("zhipu_key").value = "";
+  $("dashscope_key").value = "";
+  applyProviderUI(provider);
+}
+
+function renderStatus(s) {
+  $("stat-endpoint").textContent = s.endpoint ? s.endpoint : "未配置";
+  $("stat-provider").textContent = providerText(s.provider);
+  const keyReady = s.provider === "zhipu" ? s.zhipuKeySet : s.dashscopeKeySet;
+  $("stat-key").textContent = keyReady ? "已配置" : "未配置";
+  $("stat-key").style.color = keyReady ? "" : "var(--warn)";
+  renderProviderBadges(s);
+
+  const b = s.bridge || {};
+  const badge = $("run-badge");
+  if (!s.configured) {
+    badge.textContent = "等待配置";
+    badge.className = "badge amber";
+    $("stat-ws").textContent = "未连接（请先填写 MCP 端点）";
+  } else if (b.running && b.connected) {
+    badge.textContent = "已连接";
+    badge.className = "badge green";
+    $("stat-ws").textContent = "已连接小智 MCP 服务器";
+  } else if (b.running) {
+    badge.textContent = "连接中";
+    badge.className = "badge amber";
+    $("stat-ws").textContent = "桥接进程运行中，正在连接/重连…";
+  } else {
+    badge.textContent = "未运行";
+    badge.className = "badge gray";
+    $("stat-ws").textContent = "桥接进程未运行";
+  }
+  $("stat-lasterr").textContent = b.lastError || "无";
+}
+
+function renderState(s, options) {
+  state = s;
+  if (options && options.form) {
+    renderForm(s);
+    dirty = false;
+  }
+  renderStatus(s);
+}
+
+async function loadState(quiet, refreshForm) {
+  try {
+    const s = await fetchJson("/api/config");
+    renderState(s, { form: !!refreshForm });
+    if (!quiet) setStatus(refreshForm ? "已读取当前配置" : "", true);
+  } catch (err) {
+    if (!quiet) setStatus("读取配置失败：" + err.message, false);
+  }
+}
+
+// 标记“正在编辑”：自动刷新时只更新状态，不再把表单跳回已保存值
+function markDirty() {
+  dirty = true;
+}
+["mcp_endpoint", "mcp_url", "result_count",
+ "zhipu_key", "dashscope_key", "clear_zhipu_key", "clear_dashscope_key"]
+  .forEach((id) => {
+    const el = $(id);
+    el.addEventListener("input", markDirty);
+    el.addEventListener("change", markDirty);
+  });
+
+document.querySelectorAll('input[name="provider"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    markDirty();
+    $("clear_zhipu_key").checked = false;
+    $("clear_dashscope_key").checked = false;
+    applyProviderUI(currentProvider());
+  });
+});
+
+$("reload-btn").addEventListener("click", () => loadState(false, true));
+
+$("config-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const endpoint = $("mcp_endpoint").value.trim();
+  if (!endpoint) {
+    setStatus("请填写 MCP 服务地址", false);
+    return;
+  }
+  if (!/^wss?:\/\//.test(endpoint)) {
+    setStatus("MCP 服务地址必须以 ws:// 或 wss:// 开头", false);
+    return;
+  }
+
+  const payload = {
+    MCP_ENDPOINT: endpoint,
+    PROVIDER: currentProvider(),
+    RESULT_COUNT: Number($("result_count").value || 8),
+  };
+  if (currentProvider() === "bailian-mcp") {
+    payload.DASHSCOPE_MCP_URL = $("mcp_url").value.trim();
+    const dkey = $("dashscope_key").value.trim();
+    if (dkey) payload.DASHSCOPE_API_KEY = dkey;
+    if ($("clear_dashscope_key").checked) payload.CLEAR_DASHSCOPE_KEY = true;
+  } else {
+    const zkey = $("zhipu_key").value.trim();
+    if (zkey) payload.ZHIPU_API_KEY = zkey;
+    if ($("clear_zhipu_key").checked) payload.CLEAR_ZHIPU_KEY = true;
+  }
+
+  const btn = $("save-btn");
+  btn.disabled = true;
+  setStatus("正在保存…", true);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const s = await fetchJson("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    renderState(s, { form: true });
+    setStatus("保存成功，桥接进程正在重启并重新连接…", true);
+  } catch (err) {
+    const reason = err && err.name === "AbortError"
+      ? "请求超时，请确认 8765 端口可达后重试"
+      : (err && err.message) || "未知错误";
+    setStatus("保存失败：" + reason, false);
+  } finally {
+    clearTimeout(timer);
+    btn.disabled = false;
+  }
+});
+
+loadState(true, true);
+setInterval(() => loadState(true, false), 10000);
+</script>
+</body>
+</html>

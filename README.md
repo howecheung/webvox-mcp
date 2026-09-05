@@ -2,15 +2,81 @@
 
 语音机器人的联网搜索 MCP 服务 —— 让 StackChan / 小智 等语音助手拥有实时联网检索能力。
 
+> **形态区分**
+>
+> - **源码 / Docker / Windows**：历史主线，默认对接智谱 GLM Web Search。
+> - **飞牛 fnOS FPK v1.6.0**：本仓库新交付的应用包“小智联网查询MCP”，
+>   带 fnOS 内嵌配置页与运行日志页，支持智谱 GLM 或阿里百炼 WebSearch MCP
+>   （默认百炼）。下载与使用见下方「飞牛 fnOS」章节。
+
 ## 架构
 
 ```
-语音机器人 → wss://api.xiaozhi.me → mcp_pipe.py → 联网查询.py (MCP Server) → 智谱AI 搜索
+语音机器人 → wss://小智 MCP 端点 → mcp_pipe.py → 联网查询.py (MCP Server) → 搜索服务商
+                                                        ├─ 智谱 GLM Web Search
+                                                        └─ 阿里百炼 WebSearch MCP
 ```
+
+搜索服务商的可选项取决于运行形态：源码 / Docker 版默认接智谱 GLM；
+fnOS FPK v1.6.0 提供网页配置页，可二选一并默认阿里百炼 WebSearch MCP。
+
+## 📦 飞牛 fnOS（FPK v1.6.0）
+
+> 版本区分：仓库历史中曾有一个旧的 `fpk/`，因安装即报
+> `env file ... not found` 被标记 abandoned 并移除。本仓库 `fpk/` 目录是
+> **v1.6.0 的完整重写**，已改用 Docker Compose 挂载 + fnOS 内嵌网页配置，
+> 可在飞牛应用中心正常安装、配置与升级。
+
+### 下载与安装
+
+1. 到 [Releases](https://github.com/howecheung/webvox-mcp/releases) 下载
+   `webvox-mcp-1.6.0.fpk`（仓库内 `fpk/webvox-mcp-1.6.0.fpk` 为同一产物）。
+2. 飞牛桌面 → **应用中心 → 手动安装**，选择该 fpk。
+3. 首次启动会按 compose 拉取固定 digest 的 `ghcr.io/howecheung/webvox-mcp`
+   镜像，请确保 NAS 能访问外网。
+
+### 功能
+
+- 安装后桌面出现“小智联网查询MCP”与“小智联网查询MCP 运行日志”两个入口，
+  均在 fnOS 页面内嵌打开，不再占用独立浏览器标签；
+- 搜索服务商卡片式二选一，**默认阿里百炼 WebSearch MCP**，也可切换智谱 GLM：
+  - 阿里百炼：连接百炼 MCP 广场 WebSearch，需先在控制台开通，前 2000 次免费，
+    之后约 29 元/千次，不经过阿里侧模型；
+  - 智谱：`open.bigmodel.cn` 的 Web Search API。
+- API Key 不在页面明文回显、不写日志；留空保存保留原值，可显式清除；
+- 配置/升级兼容：旧配置若为已下线的 dashscope 原生搜索，自动迁移为
+  bailian-mcp 并保留百炼 Key；
+- 运行日志页自动刷新；桥接日志超过 256KB 自动轮转；Docker 日志限制 10MB×3。
+
+### 配置流程
+
+1. 点击桌面“小智联网查询MCP”，在“小智连接”里粘贴从小智控制台复制的
+   `wss://…?token=…` 完整 MCP 服务地址；
+2. 搜索服务商默认选中“阿里百炼 WebSearch MCP”，在卡片下方填百炼 `sk-` API Key，
+   MCP 服务地址保持默认；
+3. 改用智谱时，点选“智谱 GLM Web Search”并填智谱 API Key；
+4. 点“保存并重连”，服务端会自动重启 MCP 桥接进程并重连小智；
+5. 打开“运行日志”确认 `Successfully connected` 与后续搜索记录。
+
+### FPK 构建方案（简要）
+
+`.fpk` 本质是双层 tar.gz：外层包含 `manifest`、`manifest.checksum`、`cmd/`、
+`config/`、`wizard/`、图标与内层 `app.tgz`；`manifest.checksum` 与 manifest 中的
+`checksum` 均为 `app.tgz` 的 MD5，改过 `app/` 后必须重算。
+
+Windows 下用官方 fnpack 打包：
+
+```powershell
+cd fpk
+.\build-fpk.ps1          # 产物：fpk/dist/webvox-mcp.fpk + fpk/webvox-mcp-1.6.0.fpk
+```
+
+更完整的目录、权限、升级与故障排查说明见
+[`fpk/README.md`](fpk/README.md)。
 
 ## 快速开始
 
-### 🐳 Docker 部署（推荐，NAS / 服务器首选）
+### 🐳 Docker 部署（非 fnOS 的通用服务器）
 
 ```bash
 # 1. 创建项目目录
@@ -99,6 +165,9 @@ python mcp_pipe.py 联网查询.py
   {"success": true, "results": [{"title": "...", "content": "...", "url": "..."}]}
 ```
 
+> 供应商说明：源码 / Docker 版通过环境变量对接智谱 GLM；fnOS FPK v1.6.0
+> 通过网页配置页选择智谱 GLM 或阿里百炼 WebSearch MCP（默认百炼）。
+
 ## 项目来源与致谢
 
 本项目基于小智AI团队的 MCP 服务教程，深表感谢 🙏
@@ -113,5 +182,6 @@ python mcp_pipe.py 联网查询.py
 ├── 启动_main.py          # GUI 配置面板 (tkinter)
 ├── config_manager.py    # 配置读写 (~/.xiaozhi_mcp_config.json)
 ├── requirements.txt     # Python 依赖
+├── fpk/                 # 飞牛 fnOS FPK v1.6.0 打包工程（含 webvox-mcp-1.6.0.fpk）
 └── .env.example         # 环境变量模板
 ```

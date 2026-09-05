@@ -1,0 +1,15 @@
+[
+  {
+    "stepTitle": "安装说明",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "小智联网查询MCP 为语音机器人提供联网搜索能力。首次启动需要从 ghcr.io 拉取镜像，请确保 NAS 可以访问外网。"
+      },
+      {
+        "type": "tips",
+        "helpText": "安装完成后，请点击桌面的“小智联网查询MCP”图标打开配置页面，填写小智 MCP 端点，选择默认推荐的阿里百炼 WebSearch MCP（或智谱 GLM）并填写对应 API Key。"
+      }
+    ]
+  }
+]
