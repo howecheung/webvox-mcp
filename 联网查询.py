@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """联网查询 MCP 工具：智谱 GLM Web Search / 阿里百炼 WebSearch MCP / DeepSeek 联网搜索。
 
-通过配置页选择服务商；所有服务商对外暴露同一个工具（对外名 “webvox-联网搜索”），
+通过配置页选择服务商；所有服务商对外暴露同一个工具（对外名 “webvox-search”），
 签名与上游 webvox-mcp 保持一致：
 
 - zhipu       智谱 GLM Web Search
@@ -644,7 +644,7 @@ def _local_fetch_without_bs4(html_text, url, limit_chars=None):
     }
 
 
-@mcp.tool(name="webvox-联网搜索", title="联网搜索")
+@mcp.tool(name="webvox-search", title="联网搜索")
 def 联网查询(
     query_text: str,
     count: Optional[int] = None,
@@ -770,7 +770,7 @@ def 联网查询(
         return {"success": False, "error": f"搜索失败: {exc}"}
 
 
-# fetch_url 默认不上线：小智控制台只保留「webvox-联网搜索」一个工具。
+# fetch_url 默认不上线：小智控制台只保留「webvox-search」一个工具。
 # 需要恢复网页抓取能力时，取消下一行注释并重启桥接即可。
 # @mcp.tool()
 def fetch_url(url: str, max_chars: Optional[int] = None) -> dict:
