@@ -10,14 +10,17 @@ python mcp_pipe.py <mcp_script>
 """
 
 
-from config_manager import load_config  # 新增导入
+from config_manager import CONFIG_PATH, load_config  # 新增导入
 import os
 config = load_config()
 # 设置 MCP_ENDPOINT 环境变量
-os.environ["MCP_ENDPOINT"] = config["MCP_ENDPOINT"]
+os.environ["MCP_ENDPOINT"] = config.get("MCP_ENDPOINT", "")
 
 
 import asyncio
+import json
+import time
+from pathlib import Path
 import websockets
 import subprocess
 import logging
@@ -42,19 +45,58 @@ MAX_BACKOFF = 600  # Maximum wait time in seconds
 reconnect_attempt = 0
 backoff = INITIAL_BACKOFF
 
+# 熔断：连续失败到达上限后停止重试并退出，由 web_config 决定是否再来一轮。
+# 0 表示不限次数（一直重试）。
+RECONNECT_MAX_ATTEMPTS = int(config.get("RECONNECT_MAX_ATTEMPTS", 20) or 20)
+GIVE_UP_EXIT_CODE = 78
+STATE_FILENAME = "bridge_state.json"
+
+
+def _state_path():
+    return Path(str(CONFIG_PATH)).parent / STATE_FILENAME
+
+
+def write_state(state, attempt=0, backoff_seconds=0.0, reason=""):
+    """把桥接状态写到配置文件同目录，供配置页展示（失败不影响主流程）。"""
+    payload = {
+        "state": state,
+        "attempt": attempt,
+        "backoff": round(float(backoff_seconds), 1),
+        "reason": reason,
+        "pid": os.getpid(),
+        "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    path = _state_path()
+    try:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 async def connect_with_retry(uri):
     """Connect to WebSocket server with retry mechanism"""
     global reconnect_attempt, backoff
     while True:  # Infinite reconnection
         try:
             if reconnect_attempt > 0:
+                if RECONNECT_MAX_ATTEMPTS and reconnect_attempt > RECONNECT_MAX_ATTEMPTS:
+                    reason = f"连续重连 {reconnect_attempt - 1} 次仍失败，已停止自动重试"
+                    logger.error(reason)
+                    write_state("gave_up", reconnect_attempt, backoff, reason)
+                    # 用特定退出码告诉上层：不要再自动拉起，等人工触发
+                    sys.exit(GIVE_UP_EXIT_CODE)
                 wait_time = backoff * (1 + random.random() * 0.1)  # Add some random jitter
                 logger.info(f"Waiting {wait_time:.2f} seconds before reconnection attempt {reconnect_attempt}...")
+                write_state("reconnecting", reconnect_attempt, wait_time)
                 await asyncio.sleep(wait_time)
-                
+
             # Attempt to connect
             await connect_to_server(uri)
-        
+
+        except SystemExit:
+            raise
         except Exception as e:
             reconnect_attempt += 1
             logger.warning(f"Connection closed (attempt: {reconnect_attempt}): {e}")            
@@ -75,7 +117,7 @@ async def connect_to_server(uri):
             
             # Start mcp_script process
             process = subprocess.Popen(
-                ['python', mcp_script],
+                [sys.executable, mcp_script],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -141,9 +183,9 @@ async def pipe_process_to_websocket(process, websocket):
                 logger.info("Process has ended output")
                 break
                 
-            # 新增日志转发功能
+            # GUI 日志只写本地，不能混进 MCP 协议流（否则小智端收到非法 JSON）
             if data.startswith("[GUI_LOG]"):
-                await websocket.send(data)
+                logger.info(f"[GUI] {data[len('[GUI_LOG]'):].strip()}")
                 continue
                 
             logger.debug(f">> {data[:120]}...")

@@ -1,0 +1,13 @@
+﻿# 容器内与 fnOS 宿主机上执行的脚本必须是 LF，否则 dash 报 "set: Illegal option -"
+*.sh            text eol=lf
+fpk/cmd/*       text eol=lf
+fpk/wizard/*    text eol=lf
+fpk/config/privilege text eol=lf
+fpk/config/resource  text eol=lf
+fpk/app/python/start.sh text eol=lf
+
+# 其余文本保持默认
+*.py    text
+*.html  text
+*.md    text
+fpk/manifest    text eol=lf

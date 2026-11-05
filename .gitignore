@@ -25,3 +25,10 @@ build/
 # 系统
 .DS_Store
 Thumbs.db
+
+# 运行时产物（用量流水 / 桥接状态 / 临时配置）
+usage.jsonl
+bridge_state.json
+bridge_state.tmp
+.scratch_*
+.test_config.json

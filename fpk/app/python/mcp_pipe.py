@@ -1,209 +1,249 @@
-# -*- coding: utf-8 -*-
-"""把小智 MCP WebSocket 与本地 stdio MCP 服务连接起来。
+"""
+This script is used to connect to the MCP server and pipe the input and output to the websocket endpoint.
+Version: 0.1.0
 
-用法：python3 mcp_pipe.py /app/联网查询.py
-由 service.py 负责在配置变化或进程退出时重启本脚本。
+Usage:
+
+export MCP_ENDPOINT=<mcp_endpoint>
+python mcp_pipe.py <mcp_script>
+
 """
 
-import asyncio
-import logging
+
+from config_manager import CONFIG_PATH, load_config  # 新增导入
 import os
-import random
-import signal
-import subprocess
-import sys
+config = load_config()
+# 设置 MCP_ENDPOINT 环境变量
+os.environ["MCP_ENDPOINT"] = config.get("MCP_ENDPOINT", "")
+
+
+import asyncio
+import json
 import time
+from pathlib import Path
+import websockets
+import subprocess
+import logging
+import signal
+import sys
+import random
+from dotenv import load_dotenv
 
+# Load environment variables from .env file
+load_dotenv()
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-if APP_DIR not in sys.path:
-    sys.path.insert(0, APP_DIR)
-
-from config_manager import load_config  # noqa: E402
-
-
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("MCP_PIPE")
+logger = logging.getLogger('MCP_PIPE')
 
-INITIAL_BACKOFF = 2
-MAX_BACKOFF = 300
+# Reconnection settings
+INITIAL_BACKOFF = 1  # Initial wait time in seconds
+MAX_BACKOFF = 600  # Maximum wait time in seconds
+reconnect_attempt = 0
+backoff = INITIAL_BACKOFF
+
+# 熔断：连续失败到达上限后停止重试并退出，由 web_config 决定是否再来一轮。
+# 0 表示不限次数（一直重试）。
+RECONNECT_MAX_ATTEMPTS = int(config.get("RECONNECT_MAX_ATTEMPTS", 20) or 20)
+GIVE_UP_EXIT_CODE = 78
+STATE_FILENAME = "bridge_state.json"
 
 
-async def _pipe_ws_to_process(websocket, proc):
+def _state_path():
+    return Path(str(CONFIG_PATH)).parent / STATE_FILENAME
+
+
+def write_state(state, attempt=0, backoff_seconds=0.0, reason=""):
+    """把桥接状态写到配置文件同目录，供配置页展示（失败不影响主流程）。"""
+    payload = {
+        "state": state,
+        "attempt": attempt,
+        "backoff": round(float(backoff_seconds), 1),
+        "reason": reason,
+        "pid": os.getpid(),
+        "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    path = _state_path()
     try:
-        while True:
-            message = await websocket.recv()
-            if isinstance(message, bytes):
-                message = message.decode("utf-8", "replace")
-            logger.debug("WS -> MCP: %s", message[:200])
-            proc.stdin.write(message + "\n")
-            proc.stdin.flush()
-    finally:
-        if proc.stdin and not proc.stdin.closed:
-            proc.stdin.close()
-
-
-async def _pipe_process_to_ws(proc, websocket):
-    try:
-        while True:
-            line = await asyncio.get_event_loop().run_in_executor(
-                None, proc.stdout.readline
-            )
-            if not line:
-                logger.info("MCP 子进程 stdout 已结束")
-                break
-            logger.debug("MCP -> WS: %s", line[:200])
-            await websocket.send(line)
-    finally:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError:
         pass
 
 
-async def _drain_stderr(proc):
-    try:
-        while True:
-            line = await asyncio.get_event_loop().run_in_executor(
-                None, proc.stderr.readline
-            )
-            if not line:
-                break
-            sys.stderr.write(line)
-            sys.stderr.flush()
-    finally:
-        pass
-
-
-async def _watch_child(proc):
-    await asyncio.get_event_loop().run_in_executor(None, proc.wait)
-
-
-def _terminate_child(proc):
-    if proc is None or proc.poll() is not None:
-        return
-    logger.info("正在终止 MCP 子进程")
-    try:
-        proc.terminate()
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+async def connect_with_retry(uri):
+    """Connect to WebSocket server with retry mechanism"""
+    global reconnect_attempt, backoff
+    while True:  # Infinite reconnection
         try:
-            proc.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            pass
+            if reconnect_attempt > 0:
+                if RECONNECT_MAX_ATTEMPTS and reconnect_attempt > RECONNECT_MAX_ATTEMPTS:
+                    reason = f"连续重连 {reconnect_attempt - 1} 次仍失败，已停止自动重试"
+                    logger.error(reason)
+                    write_state("gave_up", reconnect_attempt, backoff, reason)
+                    # 用特定退出码告诉上层：不要再自动拉起，等人工触发
+                    sys.exit(GIVE_UP_EXIT_CODE)
+                wait_time = backoff * (1 + random.random() * 0.1)  # Add some random jitter
+                logger.info(f"Waiting {wait_time:.2f} seconds before reconnection attempt {reconnect_attempt}...")
+                write_state("reconnecting", reconnect_attempt, wait_time)
+                await asyncio.sleep(wait_time)
 
+            # Attempt to connect
+            await connect_to_server(uri)
 
-async def connect_to_server(uri, mcp_script):
-    child = None
+        except SystemExit:
+            raise
+        except Exception as e:
+            reconnect_attempt += 1
+            logger.warning(f"Connection closed (attempt: {reconnect_attempt}): {e}")            
+            # Calculate wait time for next reconnection (exponential backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+
+async def connect_to_server(uri):
+    """Connect to WebSocket server and establish bidirectional communication with `mcp_script`"""
+    global reconnect_attempt, backoff
     try:
-        logger.info("正在连接 WebSocket 服务器: %s", _redact_endpoint(uri))
-        async with __import__("websockets").connect(uri) as websocket:
-            logger.info("Successfully connected to WebSocket server")
-            child = subprocess.Popen(
+        logger.info(f"Connecting to WebSocket server...")
+        async with websockets.connect(uri) as websocket:
+            logger.info(f"Successfully connected to WebSocket server")
+            
+            # Reset reconnection counter if connection closes normally
+            reconnect_attempt = 0
+            backoff = INITIAL_BACKOFF
+            
+            # Start mcp_script process
+            process = subprocess.Popen(
                 [sys.executable, mcp_script],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=APP_DIR,
-                env=dict(os.environ),
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                encoding='utf-8',  # Add encoding parameter
+                errors='replace'   # Handle decoding errors gracefully
             )
-            logger.info("已启动 %s（pid=%s）", mcp_script, child.pid)
-            tasks = {
-                asyncio.create_task(_pipe_ws_to_process(websocket, child)),
-                asyncio.create_task(_pipe_process_to_ws(child, websocket)),
-                asyncio.create_task(_drain_stderr(child)),
-                asyncio.create_task(_watch_child(child)),
-            }
-            # 任一通道结束或子进程退出时，关闭整条链路让上层重连
-            done, pending = await asyncio.wait(
-                tasks, return_when=asyncio.FIRST_COMPLETED
+            logger.info(f"Started {mcp_script} process")
+            
+            # Create two tasks: read from WebSocket and write to process, read from process and write to WebSocket
+            await asyncio.gather(
+                pipe_websocket_to_process(websocket, process),
+                pipe_process_to_websocket(process, websocket),
+                pipe_process_stderr_to_terminal(process)
             )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            logger.info("MCP 管道链路结束（子进程退出或连接关闭）")
+    except websockets.exceptions.ConnectionClosed as e:
+        logger.error(f"WebSocket connection closed: {e}")
+        raise  # Re-throw exception to trigger reconnection
+    except Exception as e:
+        logger.error(f"Connection error: {e}")
+        raise  # Re-throw exception
     finally:
-        _terminate_child(child)
+        # Ensure the child process is properly terminated
+        if 'process' in locals():
+            logger.info(f"Terminating {mcp_script} process")
+            try:
+                process.terminate()
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            logger.info(f"{mcp_script} process terminated")
 
-
-def _redact_endpoint(uri):
-    """日志中隐藏查询串里的 token，避免泄露凭据。"""
-    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-
+async def pipe_websocket_to_process(websocket, process):
+    """Read data from WebSocket and write to process stdin"""
     try:
-        parts = urlsplit(uri)
-        if not parts.query:
-            return uri
-        redacted = []
-        for key, value in parse_qsl(parts.query, keep_blank_values=True):
-            if key.lower() in ("token", "key", "apikey", "api_key", "access_token"):
-                value = "***" if value else ""
-            redacted.append((key, value))
-        return urlunsplit(
-            (parts.scheme, parts.netloc, parts.path, urlencode(redacted), parts.fragment)
-        )
-    except Exception:
-        return "<endpoint>"
+        while True:
+            # Read message from WebSocket
+            message = await websocket.recv()
+            logger.debug(f"<< {message[:120]}...")
+            
+            # Write to process stdin (in text mode)
+            if isinstance(message, bytes):
+                message = message.decode('utf-8')
+            process.stdin.write(message + '\n')
+            process.stdin.flush()
+    except Exception as e:
+        logger.error(f"Error in WebSocket to process pipe: {e}")
+        raise  # Re-throw exception to trigger reconnection
+    finally:
+        # Close process stdin
+        if not process.stdin.closed:
+            process.stdin.close()
 
+async def pipe_process_to_websocket(process, websocket):
+    """Read data from process stdout and send to WebSocket"""
+    try:
+        while True:
+            # Read data from process stdout
+            data = await asyncio.get_event_loop().run_in_executor(
+                None, process.stdout.readline
+            )
+            
+            if not data:
+                logger.info("Process has ended output")
+                break
+                
+            # GUI 日志只写本地，不能混进 MCP 协议流（否则小智端收到非法 JSON）
+            if data.startswith("[GUI_LOG]"):
+                logger.info(f"[GUI] {data[len('[GUI_LOG]'):].strip()}")
+                continue
+                
+            logger.debug(f">> {data[:120]}...")
+            await websocket.send(data)
+    except Exception as e:
+        logger.error(f"Error in process to WebSocket pipe: {e}")
+        raise  # Re-throw exception to trigger reconnection
 
-async def connect_with_retry(uri, mcp_script):
-    attempt = 0
-    backoff = INITIAL_BACKOFF
-    while True:
-        try:
-            if attempt:
-                jittered = backoff * (1 + random.random() * 0.1)
-                logger.info(
-                    "第 %s 次重连，等待 %.1f 秒...", attempt, jittered
-                )
-                await asyncio.sleep(jittered)
-            await connect_to_server(uri, mcp_script)
-            attempt = 0
-            backoff = INITIAL_BACKOFF
-        except Exception as exc:  # noqa: BLE001 - 需无限重连
-            attempt += 1
-            logger.warning("连接已断开（第 %s 次）: %s", attempt, exc)
-            backoff = min(backoff * 2, MAX_BACKOFF)
+async def pipe_process_stderr_to_terminal(process):
+    """Read data from process stderr and print to terminal"""
+    try:
+        while True:
+            # Read data from process stderr
+            data = await asyncio.get_event_loop().run_in_executor(
+                None, process.stderr.readline
+            )
+            
+            if not data:  # If no data, the process may have ended
+                logger.info("Process has ended stderr output")
+                break
+                
+            # Print stderr data to terminal (in text mode, data is already a string)
+            sys.stderr.write(data)
+            sys.stderr.flush()
+    except Exception as e:
+        logger.error(f"Error in process stderr pipe: {e}")
+        raise  # Re-throw exception to trigger reconnection
 
-
-def _handle_term(signum, frame):
-    logger.info("收到退出信号 %s，mcp_pipe 退出", signum)
+def signal_handler(sig, frame):
+    """Handle interrupt signals"""
+    logger.info("Received interrupt signal, shutting down...")
     sys.exit(0)
 
-
-def main():
-    signal.signal(signal.SIGTERM, _handle_term)
-    signal.signal(signal.SIGINT, _handle_term)
-
-    if len(sys.argv) < 2:
-        logger.error("用法: mcp_pipe.py <mcp_script>")
-        return 1
-    mcp_script = sys.argv[1]
-    if not os.path.isabs(mcp_script):
-        mcp_script = os.path.join(APP_DIR, mcp_script)
-
-    config = load_config()
-    endpoint = config.get("MCP_ENDPOINT", "")
-    os.environ.setdefault("MCP_ENDPOINT", endpoint)
-    if not endpoint or not endpoint.startswith(("ws://", "wss://")):
-        logger.error("MCP_ENDPOINT 为空或格式不正确，等待配置页填写后由 service.py 重启")
-        return 1
-
-    logger.info("MCP 端点已读取（令牌已隐藏）")
-    try:
-        asyncio.run(connect_with_retry(endpoint, mcp_script))
-    except KeyboardInterrupt:
-        logger.info("用户中断")
-    except Exception as exc:  # noqa: BLE001
-        logger.error("运行出错: %s", exc)
-        return 1
-    return 0
-
+# 新增日志发送函数
+def send_log_to_gui(message):
+    print(f"[GUI_LOG]{message}")
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Register signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # mcp_script
+    if len(sys.argv) < 2:
+        logger.error("Usage: mcp_pipe.py <mcp_script>")
+        sys.exit(1)
+    
+    mcp_script = sys.argv[1]
+    
+    # Get token from environment variable or command line arguments
+    endpoint_url = os.environ.get('MCP_ENDPOINT')
+    if not endpoint_url:
+        logger.error("Please set the `MCP_ENDPOINT` environment variable")
+        sys.exit(1)
+    
+    # Start main loop
+    try:
+        asyncio.run(connect_with_retry(endpoint_url))
+    except KeyboardInterrupt:
+        logger.info("Program interrupted by user")
+    except Exception as e:
+        logger.error(f"Program execution error: {e}")

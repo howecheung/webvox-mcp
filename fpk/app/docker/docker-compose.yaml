@@ -15,6 +15,10 @@ services:
       - HOME=/config
       - TZ=Asia/Shanghai
       - PYTHONDONTWRITEBYTECODE=1
+      # 容器内必须监听全部网卡，否则 fnOS 端口映射进不来
+      - WEBVOX_HOST=0.0.0.0
+      # /app 是只读挂载，日志必须写到 /config
+      - WEBVOX_LOG_DIR=/config/logs
     volumes:
       - "${TRIM_PKGVAR}:/config"
       - "${TRIM_APPDEST}/python:/app:ro"

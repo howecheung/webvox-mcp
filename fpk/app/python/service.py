@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""联网查询MCP 容器主服务。
+"""联网查询MCP 本地主服务（Windows / 容器通用）。
 
 职责：
 1. 在 8765 端口提供配置网页与 /api/config 读写接口（不把密钥回显给浏览器）；
-2. 把配置持久化到 /config/.xiaozhi_mcp_config.json（宿主机 @appdata 目录）；
+2. 把配置持久化到 $HOME/.xiaozhi_mcp_config.json；
 3. 监督 mcp_pipe 子进程：配置保存后自动重启，进程崩溃后自动拉起。
 
 所有密钥/令牌不会写入日志。
@@ -32,7 +32,13 @@ WWW_DIR = APP_DIR / "www"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from config_manager import CONFIG_PATH, load_config, save_config  # noqa: E402
+from config_manager import (  # noqa: E402
+    CACHE_TTL_MAX,
+    CONFIG_PATH,
+    dpapi_available,
+    load_config,
+    save_config,
+)
 
 
 # 容器内默认就是 UTF-8；此设置便于在 Windows 本地调试时日志不乱码
@@ -43,7 +49,8 @@ except Exception:  # noqa: BLE001
     pass
 
 CONFIG_PORT = int(os.environ.get("WEBVOX_PORT", "8765"))
-LOG_DIR = CONFIG_PATH.parent / "logs"
+# 日志目录：默认放在项目目录下（Windows 本地运行更方便，也避免写入用户根目录被拒）
+LOG_DIR = Path(os.environ.get("WEBVOX_LOG_DIR") or (APP_DIR / "logs"))
 BRIDGE_LOG_MAX_BYTES = 256 * 1024
 REDACTED_TOKEN = "__WEBVOX_REDACTED__"
 SECRET_QUERY_KEYS = {"token", "key", "apikey", "api_key", "access_token", "secret"}
@@ -64,6 +71,84 @@ def log(msg):
 # ---------------------------------------------------------------------------
 # 桥接进程（mcp_pipe）管理
 # ---------------------------------------------------------------------------
+
+
+def _terminate_process_tree(proc, pid):
+    """跨平台终止桥接进程及其子进程。
+
+    Windows 没有 os.killpg，改用 taskkill /T 终止整棵进程树；
+    POSIX 仍使用进程组信号，保证 mcp_pipe 与其子进程一起退出。
+    """
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=6)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+        return
+
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, AttributeError):
+        pass
+    try:
+        proc.wait(timeout=6)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, AttributeError):
+            pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+BRIDGE_STATE_FILENAME = "bridge_state.json"
+GIVE_UP_EXIT_CODE = 78
+
+
+def bridge_state_path():
+    return Path(str(CONFIG_PATH)).parent / BRIDGE_STATE_FILENAME
+
+
+def _read_bridge_state():
+    """读取 mcp_pipe 写的状态文件；读不到就返回空字典。"""
+    path = bridge_state_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return data
+
+
+def _clear_bridge_state():
+    try:
+        bridge_state_path().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 class BridgeManager:
@@ -145,6 +230,7 @@ class BridgeManager:
         with self.lock:
             if self.proc is not None and self.proc.poll() is None:
                 return
+            _clear_bridge_state()
             try:
                 self.proc = subprocess.Popen(
                     [sys.executable, str(APP_DIR / "mcp_pipe.py"), str(APP_DIR / "联网查询.py")],
@@ -180,21 +266,7 @@ class BridgeManager:
         if proc is None:
             return
         pid = proc.pid
-        try:
-            os.killpg(pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
-        try:
-            proc.wait(timeout=6)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
+        _terminate_process_tree(proc, pid)
         if reason:
             log(f"MCP 桥接进程已停止（{reason}）")
         else:
@@ -208,6 +280,7 @@ class BridgeManager:
                 "connected": bool(alive and self.connected),
                 "startedAt": self.started_at,
                 "lastError": self.last_error,
+                "retry": _read_bridge_state(),
             }
 
 
@@ -289,8 +362,19 @@ def _public_state(bridge):
         "provider": cfg.get("PROVIDER", "bailian-mcp"),
         "dashscopeMcpUrl": cfg.get("DASHSCOPE_MCP_URL", ""),
         "resultCount": int(cfg.get("RESULT_COUNT", 8)),
+        "resultMode": cfg.get("RESULT_MODE", "brief"),
+        "resultMaxChars": int(cfg.get("RESULT_MAX_CHARS", 4000)),
+        "searchTimeout": int(cfg.get("SEARCH_TIMEOUT", 15)),
+        "cacheTtl": int(cfg.get("CACHE_TTL", 60)),
+        "reconnectMaxAttempts": int(cfg.get("RECONNECT_MAX_ATTEMPTS", 20)),
+        "encryptKeys": bool(cfg.get("ENCRYPT_KEYS", True)),
+        "encryptAvailable": dpapi_available(),
         "zhipuKeySet": bool(cfg.get("ZHIPU_API_KEY")),
         "dashscopeKeySet": bool(cfg.get("DASHSCOPE_API_KEY")),
+        "deepseekKeySet": bool(cfg.get("DEEPSEEK_API_KEY")),
+        "deepseekBaseUrl": cfg.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        "fetchMode": cfg.get("FETCH_MODE", "auto"),
+        "fetchMaxChars": int(cfg.get("FETCH_MAX_CHARS", 6000)),
         "bridge": bridge.status(),
     }
 
@@ -346,7 +430,7 @@ def _apply_save(payload, bridge):
         # 兼容旧页面仍提交 dashscope：原生搜索已下线，统一落到百炼 MCP
         if provider == "dashscope":
             provider = "bailian-mcp"
-        if provider not in ("zhipu", "bailian-mcp"):
+        if provider not in ("zhipu", "bailian-mcp", "deepseek"):
             return None, "请选择有效的联网搜索服务商"
         new_cfg["PROVIDER"] = provider
 
@@ -356,11 +440,74 @@ def _apply_save(payload, bridge):
             return None, "百炼 MCP 服务地址必须以 http:// 或 https:// 开头"
         new_cfg["DASHSCOPE_MCP_URL"] = mcp_url
 
+    if "DEEPSEEK_BASE_URL" in payload:
+        base_url = str(payload.get("DEEPSEEK_BASE_URL") or "").strip().rstrip("/")
+        if not base_url:
+            base_url = "https://api.deepseek.com"
+        if not base_url.startswith(("http://", "https://")) or len(base_url) > 200:
+            return None, "DeepSeek 接口地址必须以 http:// 或 https:// 开头"
+        new_cfg["DEEPSEEK_BASE_URL"] = base_url
+
     if "RESULT_COUNT" in payload:
         try:
             new_cfg["RESULT_COUNT"] = max(1, min(50, int(payload.get("RESULT_COUNT"))))
         except (TypeError, ValueError):
             return None, "返回条数必须是 1-50 的整数"
+
+    if "RESULT_MODE" in payload:
+        result_mode = str(payload.get("RESULT_MODE") or "brief").strip().lower()
+        if result_mode not in ("brief", "detail"):
+            return None, "搜索返回粒度必须是 brief / detail"
+        new_cfg["RESULT_MODE"] = result_mode
+
+    if "RESULT_MAX_CHARS" in payload:
+        try:
+            new_cfg["RESULT_MAX_CHARS"] = max(
+                500, min(50000, int(payload.get("RESULT_MAX_CHARS")))
+            )
+        except (TypeError, ValueError):
+            return None, "回传总字符上限必须是 500-50000 的整数"
+
+    if "SEARCH_TIMEOUT" in payload:
+        try:
+            new_cfg["SEARCH_TIMEOUT"] = max(
+                3, min(60, int(payload.get("SEARCH_TIMEOUT")))
+            )
+        except (TypeError, ValueError):
+            return None, "搜索超时必须是 3-60 的整数（秒）"
+
+    if "FETCH_MODE" in payload:
+        fetch_mode = str(payload.get("FETCH_MODE") or "auto").strip().lower()
+        if fetch_mode not in ("auto", "deepseek", "local"):
+            return None, "网页抓取方式必须是 auto / deepseek / local"
+        new_cfg["FETCH_MODE"] = fetch_mode
+
+    if "FETCH_MAX_CHARS" in payload:
+        try:
+            new_cfg["FETCH_MAX_CHARS"] = max(
+                500, min(20000, int(payload.get("FETCH_MAX_CHARS")))
+            )
+        except (TypeError, ValueError):
+            return None, "抓取正文长度必须是 500-20000 的整数"
+
+    if "CACHE_TTL" in payload:
+        try:
+            new_cfg["CACHE_TTL"] = max(
+                0, min(CACHE_TTL_MAX, int(payload.get("CACHE_TTL")))
+            )
+        except (TypeError, ValueError):
+            return None, "缓存时长必须是 0-3600 的整数（秒，0 表示关闭）"
+
+    if "ENCRYPT_KEYS" in payload:
+        new_cfg["ENCRYPT_KEYS"] = bool(payload.get("ENCRYPT_KEYS"))
+
+    if "RECONNECT_MAX_ATTEMPTS" in payload:
+        try:
+            new_cfg["RECONNECT_MAX_ATTEMPTS"] = max(
+                0, min(1000, int(payload.get("RECONNECT_MAX_ATTEMPTS")))
+            )
+        except (TypeError, ValueError):
+            return None, "自动重连次数上限必须是 0-1000 的整数（0 表示不限）"
 
     # 密钥：输入框留空表示保留原值；显式清除时删除
     if payload.get("CLEAR_ZHIPU_KEY") is True:
@@ -372,6 +519,11 @@ def _apply_save(payload, bridge):
         new_cfg["DASHSCOPE_API_KEY"] = ""
     elif payload.get("DASHSCOPE_API_KEY"):
         new_cfg["DASHSCOPE_API_KEY"] = str(payload["DASHSCOPE_API_KEY"]).strip()
+
+    if payload.get("CLEAR_DEEPSEEK_KEY") is True:
+        new_cfg["DEEPSEEK_API_KEY"] = ""
+    elif payload.get("DEEPSEEK_API_KEY"):
+        new_cfg["DEEPSEEK_API_KEY"] = str(payload["DEEPSEEK_API_KEY"]).strip()
 
     try:
         save_config(new_cfg)
@@ -385,6 +537,8 @@ def _log_save_summary():
     provider = cfg.get("PROVIDER", "bailian-mcp")
     if provider == "zhipu":
         key_ready = bool(cfg.get("ZHIPU_API_KEY"))
+    elif provider == "deepseek":
+        key_ready = bool(cfg.get("DEEPSEEK_API_KEY"))
     else:
         key_ready = bool(cfg.get("DASHSCOPE_API_KEY"))
     log(
@@ -392,7 +546,135 @@ def _log_save_summary():
         + provider
         + "，API Key="
         + ("已配置" if key_ready else "未配置（当前服务商搜索会被拒绝）")
+        + "，抓取方式="
+        + cfg.get("FETCH_MODE", "auto")
+        + "，返回粒度="
+        + cfg.get("RESULT_MODE", "brief")
+        + f"，预算={cfg.get('RESULT_MAX_CHARS', 4000)}字"
+        + f"，超时={cfg.get('SEARCH_TIMEOUT', 15)}秒"
+        + f"，缓存={cfg.get('CACHE_TTL', 60)}秒"
+        + "，Key加密="
+        + ("开" if cfg.get("ENCRYPT_KEYS", True) and dpapi_available() else "关")
     )
+
+
+# ---------------------------------------------------------------------------
+# 测试搜索 / 用量统计
+# ---------------------------------------------------------------------------
+
+DEEPSEEK_PRICE_PER_1000 = 5.0  # 元 / 1000 次成功请求
+
+
+def _tool_module():
+    """延迟导入 联网查询.py（模块名是中文，只能走 importlib）。"""
+    try:
+        import importlib
+
+        return importlib.import_module("联网查询")
+    except Exception as exc:  # noqa: BLE001
+        log(f"加载搜索模块失败: {exc}")
+        return None
+
+
+def _run_test_search(query, count=5):
+    """在配置页直接试搜一次，不经过小智端。"""
+    module = _tool_module()
+    if module is None:
+        return {"ok": False, "error": "无法加载搜索模块"}
+    func = getattr(module, "联网查询", None)
+    if func is None:
+        return {"ok": False, "error": "搜索模块里没有联网查询工具"}
+    func = getattr(func, "fn", func)  # FastMCP 会包装成 tool 对象
+    started = time.perf_counter()
+    try:
+        result = func(query, int(count))
+    except Exception as exc:  # noqa: BLE001 - 页面要拿到可读错误
+        return {"ok": False, "error": f"测试搜索异常: {exc}"}
+    elapsed = int((time.perf_counter() - started) * 1000)
+    if not isinstance(result, dict):
+        return {"ok": False, "error": "搜索返回格式异常", "ms": elapsed}
+    if not result.get("success"):
+        return {"ok": False, "error": result.get("error") or "搜索失败", "ms": elapsed}
+    titles = [
+        str(item.get("title") or "") for item in (result.get("results") or [])[:5]
+    ]
+    return {
+        "ok": True,
+        "provider": result.get("provider"),
+        "mode": result.get("mode"),
+        "count": result.get("count", 0),
+        "cached": bool(result.get("cached")),
+        "truncated": bool(result.get("truncated")),
+        "ms": elapsed,
+        "titles": titles,
+    }
+
+
+def _usage_stats():
+    """读取 usage.jsonl，汇总今天的调用量与 DeepSeek 预估费用。"""
+    module = _tool_module()
+    path = None
+    if module is not None:
+        try:
+            path = module.usage_file_path()
+        except Exception:  # noqa: BLE001
+            path = None
+    stats = {
+        "date": time.strftime("%Y-%m-%d"),
+        "calls": 0,
+        "cached": 0,
+        "failed": 0,
+        "items": 0,
+        "byProvider": {},
+        "deepseekEstimatedCost": 0.0,
+        "deepseekBillable": 0,
+        "enabled": dpapi_available(),  # 仅表示加密能力，与缓存无关
+        "file": str(path) if path else "",
+    }
+    if path is None or not os.path.exists(path):
+        return stats
+
+    today = stats["date"]
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not str(rec.get("ts", "")).startswith(today):
+                    continue
+                provider = str(rec.get("provider") or "?")
+                count = int(rec.get("count") or 0)
+                cached = bool(rec.get("cached"))
+                stats["calls"] += 1
+                if cached:
+                    stats["cached"] += 1
+                if count <= 0:
+                    stats["failed"] += 1
+                else:
+                    stats["items"] += count
+                bucket = stats["byProvider"].setdefault(
+                    provider, {"calls": 0, "cached": 0, "items": 0}
+                )
+                bucket["calls"] += 1
+                if cached:
+                    bucket["cached"] += 1
+                bucket["items"] += count
+                # 计费口径：DeepSeek 只对「成功返回结果且未命中缓存」的请求计费
+                if provider == "deepseek" and not cached and count > 0:
+                    stats["deepseekBillable"] += 1
+    except OSError as exc:
+        log(f"读取用量统计失败: {exc}")
+        return stats
+
+    stats["deepseekEstimatedCost"] = round(
+        stats["deepseekBillable"] * DEEPSEEK_PRICE_PER_1000 / 1000.0, 4
+    )
+    return stats
 
 
 class ConfigHandler(BaseHTTPRequestHandler):
@@ -493,6 +775,8 @@ class ConfigHandler(BaseHTTPRequestHandler):
                 self._send_json(200, _public_state(BRIDGE))
             elif path == "/api/logs":
                 self._send_logs()
+            elif path == "/api/usage":
+                self._send_json(200, _usage_stats())
             elif path == "/favicon.ico":
                 self.send_response(204)
                 self._send_cors()
@@ -510,6 +794,34 @@ class ConfigHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             path = urllib.parse.urlsplit(self.path).path
+            if path == "/api/reconnect":
+                if _rate_limited(self.client_address[0]):
+                    self._send_json(429, {"error": "操作过于频繁，请稍后再试"})
+                    return
+                _clear_bridge_state()
+                FORCE_RECONNECT.set()
+                log("配置页请求手动重连")
+                self._send_json(200, _public_state(BRIDGE))
+                return
+            if path == "/api/test-search":
+                if _rate_limited(self.client_address[0]):
+                    self._send_json(429, {"error": "操作过于频繁，请稍后再试"})
+                    return
+                payload = self._read_json_body()
+                if payload is None:
+                    self._send_json(400, {"error": "请求体不是合法的 JSON 对象"})
+                    return
+                query = str(payload.get("query") or "").strip()
+                if not query:
+                    self._send_json(400, {"error": "请先填写要测试的搜索词"})
+                    return
+                try:
+                    count = int(payload.get("count") or 5)
+                except (TypeError, ValueError):
+                    count = 5
+                count = max(1, min(10, count))
+                self._send_json(200, _run_test_search(query, count))
+                return
             if path != "/api/config":
                 self._send_json(404, {"error": "Not Found"})
                 return
@@ -548,6 +860,7 @@ class ConfigHandler(BaseHTTPRequestHandler):
 BRIDGE = BridgeManager()
 RESTART_DEBOUNCE_SECONDS = 1.2
 CRASH_RESTART_DELAY_SECONDS = 3
+FORCE_RECONNECT = threading.Event()
 
 
 def _endpoint_valid(cfg):
@@ -582,6 +895,27 @@ def control_loop(stop_event):
             BRIDGE.set_error(message)
         elif not alive:
             pending_change_since = None
+            state = _read_bridge_state()
+            gave_up = state.get("state") == "gave_up"
+            if FORCE_RECONNECT.is_set():
+                FORCE_RECONNECT.clear()
+                gave_up = False
+                _clear_bridge_state()
+                last_start_attempt = 0.0
+                log("收到手动重连请求，准备重新拉起桥接进程")
+            elif gave_up and running_fingerprint is not None and fingerprint != running_fingerprint:
+                gave_up = False
+                _clear_bridge_state()
+                log("配置已更新，解除熔断并重新连接")
+            if gave_up:
+                reason = state.get("reason") or "连续重连失败"
+                message = f"已停止自动重连（{reason}），可点“重新连接”恢复"
+                if message != last_error_reported:
+                    log(message)
+                    last_error_reported = message
+                BRIDGE.set_error(message)
+                stop_event.wait(1.0)
+                continue
             now = time.time()
             if now - last_start_attempt >= CRASH_RESTART_DELAY_SECONDS:
                 if BRIDGE.start():
@@ -619,11 +953,15 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
-    httpd = ThreadingHTTPServer(("0.0.0.0", CONFIG_PORT), ConfigHandler)
+    # 容器（fnOS / NAS）里必须监听 0.0.0.0 才能被端口映射访问；
+    # Windows 本地默认只听回环，避免把配置页暴露到局域网。
+    default_host = "0.0.0.0" if os.name == "posix" else "127.0.0.1"
+    bind_host = os.environ.get("WEBVOX_HOST", default_host)
+    httpd = ThreadingHTTPServer((bind_host, CONFIG_PORT), ConfigHandler)
     httpd.daemon_threads = True
     server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     server_thread.start()
-    log("HTTP 配置服务已启动")
+    log(f"HTTP 配置服务已启动: http://{bind_host}:{CONFIG_PORT}")
 
     try:
         control_loop(STOP_EVENT)

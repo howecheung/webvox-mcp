@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>联网查询MCP · 运行日志</title>
+<style>
+  :root {
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --border: #dde3ee;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap { max-width: 900px; margin: 20px auto; padding: 0 16px 40px; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; }
+  .subtitle { color: var(--muted); font-size: 13px; margin: 4px 0 14px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 8px 14px; border: 0; border-radius: 8px;
+    background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; text-decoration: none; margin-right: 8px;
+  }
+  .btn.secondary { background: #eef2f7; color: var(--text); font-weight: 500; }
+  .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .controls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .controls input { width: auto; }
+  #meta { margin-left: auto; font-size: 12px; color: var(--muted); }
+  pre.logs {
+    background: #0f172a;
+    color: #cbd5e1;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    height: 58vh;
+    min-height: 280px;
+    overflow-y: auto;
+    margin: 0;
+  }
+  pre.logs:empty::after { content: "暂无日志…"; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="top">
+      <div>
+        <h1>运行日志</h1>
+        <p class="subtitle">联网查询MCP：服务启动、WebSocket 重连与搜索服务商调用记录</p>
+      </div>
+      <div>
+        <a class="btn secondary" href="/">返回配置</a>
+        <button class="btn" id="refresh-btn">刷新</button>
+      </div>
+    </div>
+    <div class="controls">
+      <label><input type="checkbox" id="auto-refresh" checked>自动刷新（3 秒）</label>
+      <label><input type="checkbox" id="auto-scroll" checked>跟随最新</label>
+      <span id="meta">尚未加载</span>
+    </div>
+  </div>
+  <pre class="logs" id="logbox"></pre>
+  <p style="color: var(--muted); font-size: 12px; text-align: center; margin-top: 10px">
+    日志只保存在内存与 NAS 容器日志中，不包含密钥/令牌明文。
+  </p>
+</div>
+
+<script>
+"use strict";
+const box = document.getElementById("logbox");
+const meta = document.getElementById("meta");
+const autoRefresh = document.getElementById("auto-refresh");
+const autoScroll = document.getElementById("auto-scroll");
+
+async function loadLogs(manual) {
+  try {
+    const res = await fetch("/api/logs?lines=400");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    const stick = autoScroll.checked &&
+      (box.scrollHeight - box.scrollTop - box.clientHeight < 60);
+    box.textContent = lines.join("\n");
+    if (stick) box.scrollTop = box.scrollHeight;
+    const updated = new Date().toLocaleTimeString();
+    meta.textContent = "共 " + lines.length + " 行 · " + updated;
+  } catch (err) {
+    meta.textContent = "加载失败：" + (err.message || err);
+  }
+}
+
+document.getElementById("refresh-btn").addEventListener("click", () => loadLogs(true));
+autoRefresh.addEventListener("change", () => {
+  if (autoRefresh.checked) loadLogs(true);
+});
+setInterval(() => {
+  if (autoRefresh.checked) loadLogs(false);
+}, 3000);
+loadLogs(true);
+</script>
+</body>
+</html>
