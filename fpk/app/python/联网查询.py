@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """联网查询 MCP 工具：智谱 GLM Web Search / 阿里百炼 WebSearch MCP / DeepSeek 联网搜索。
 
-通过配置页选择服务商；所有服务商对外暴露同一个“联网查询”工具，签名与
-上游 webvox-mcp 保持一致：
+通过配置页选择服务商；所有服务商对外暴露同一个工具（对外名 “webvox-联网搜索”），
+签名与上游 webvox-mcp 保持一致：
 
 - zhipu       智谱 GLM Web Search
 - bailian-mcp 阿里百炼 MCP 广场“联网搜索”WebSearch（需在控制台先开通）
 - deepseek    DeepSeek 官方联网搜索（POST /v1/tools/search）
 
-另有 fetch_url 工具抓取指定网页正文（DeepSeek Fetch 接口，失败时本地兜底）。
+fetch_url 抓页能力默认下线（小智控制台只保留一个工具）；需要时取消 fetch_url
+上方的装饰器注释即可恢复。
 """
 
 import copy
@@ -643,7 +644,7 @@ def _local_fetch_without_bs4(html_text, url, limit_chars=None):
     }
 
 
-@mcp.tool()
+@mcp.tool(name="webvox-联网搜索", title="联网搜索")
 def 联网查询(
     query_text: str,
     count: Optional[int] = None,
@@ -769,7 +770,9 @@ def 联网查询(
         return {"success": False, "error": f"搜索失败: {exc}"}
 
 
-@mcp.tool()
+# fetch_url 默认不上线：小智控制台只保留「webvox-联网搜索」一个工具。
+# 需要恢复网页抓取能力时，取消下一行注释并重启桥接即可。
+# @mcp.tool()
 def fetch_url(url: str, max_chars: Optional[int] = None) -> dict:
     """抓取指定网页并返回正文内容（Markdown / 纯文本）。
 

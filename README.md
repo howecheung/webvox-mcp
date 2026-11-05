@@ -43,7 +43,7 @@ python web_config.py
 - **API Key**：三家各自独立填写，留空保存＝保留原值，可显式清除；密钥不回显、不写日志；
 - **结果条数**：1–50；
 - **语音设备优化**：返回粒度（简要 / 详细）+ 一次回传总字符上限（500–50000）+ 单次搜索超时（3–60 秒）+ 结果缓存时长（0–3600 秒，0 关闭）；
-- **网页抓取**：抓取方式（自动 / 仅 DeepSeek / 仅本地）+ 抓取正文长度上限（500–20000），对应 `fetch_url` 工具；
+- **网页抓取**：抓取方式（自动 / 仅 DeepSeek / 仅本地）+ 抓取正文长度上限（500–20000）。对应 `fetch_url` 工具，**1.7.3 起默认不注册**（只保留一个对外工具）；
 - **API Key 加密**：Windows 下用系统 DPAPI 加密落盘，配置拷到别的机器解不开；容器无 DPAPI 自动回退 600 权限明文；
 - **测试与用量**：页面上直接试搜一次（验证 Key 与网络），并显示今日调用次数、缓存命中数、各服务商次数与 DeepSeek 预估费用；
 - **运行日志页** `/logs`：查看桥接进程与搜索记录，256KB 自动轮转；
@@ -102,17 +102,17 @@ python web_config.py
 | `WEBVOX_LOG_DIR` | `<项目目录>/logs` | 桥接日志目录 |
 | `XIAOZHI_MCP_CONFIG` | `~/.xiaozhi_mcp_config.json` | 配置文件路径 |
 
-## 📦 飞牛 fnOS（FPK v1.7.2）
+## 📦 飞牛 fnOS（FPK v1.7.3）
 
 > 版本区分：仓库历史中曾有一个旧的 `fpk/`，因安装即报
 > `env file ... not found` 被标记 abandoned 并移除。本仓库 `fpk/` 目录是
-> **v1.6.0 起的完整重写**（当前 v1.7.2），已改用 Docker Compose 挂载 +
+> **v1.6.0 起的完整重写**（当前 v1.7.3），已改用 Docker Compose 挂载 +
 > fnOS 内嵌网页配置，可在飞牛应用中心正常安装、配置与升级。
 
 ### 下载与安装
 
 1. 到 [Releases](https://github.com/howecheung/webvox-mcp/releases) 下载
-   `webvox-mcp-1.7.2.fpk`（仓库内 `fpk/webvox-mcp-1.7.2.fpk` 为同一产物）。
+   `webvox-mcp-1.7.3.fpk`（仓库内 `fpk/webvox-mcp-1.7.3.fpk` 为同一产物）。
 2. 飞牛桌面 → **应用中心 → 手动安装**，选择该 fpk。
 3. 首次启动会按 compose 拉取固定 digest 的 `ghcr.io/howecheung/webvox-mcp`
    镜像，请确保 NAS 能访问外网。
@@ -123,14 +123,14 @@ python web_config.py
 
 | 日志现象 | 原因 | 处理 |
 | --- | --- | --- |
-| `start.sh: 4: set: Illegal option -`，容器反复重启 | 打包时 `start.sh` 被 Windows 的 CRLF 行尾污染，`/bin/sh`（dash）解析不了 `set -e` | 1.6.0 之后的包已用 `tools` 里的构建脚本强制 LF 并自检；用 v1.7.2 及以上版本 |
+| `start.sh: 4: set: Illegal option -`，容器反复重启 | 打包时 `start.sh` 被 Windows 的 CRLF 行尾污染，`/bin/sh`（dash）解析不了 `set -e` | 1.6.0 之后的包已用 `tools` 里的构建脚本强制 LF 并自检；用 v1.7.3 及以上版本 |
 | 日志里有 `[deps] 缺失依赖: xxx` | 镜像里缺某个 Python 包 | 缺 `requests` 时 DeepSeek 会明确报错（不影响智谱/百炼）；缺 `mcp` 则需要换官方镜像 |
 | 容器 Running 但页面打不开 | 端口没映射或服务未监听 `0.0.0.0` | 检查 compose 的 `WEBVOX_HOST=0.0.0.0` 与 `service_port = 8765` |
 
 > 校验自建包是否干净（应有 `CRLF: 无`）：
 >
 > ```powershell
-> python -c "import tarfile,io; o=tarfile.open('fpk/webvox-mcp-1.7.2.fpk'); inner=tarfile.open(fileobj=io.BytesIO(o.extractfile('app.tgz').read())); d=inner.extractfile('python/start.sh').read(); print('CRLF:', d.count(b'\r'))"
+> python -c "import tarfile,io; o=tarfile.open('fpk/webvox-mcp-1.7.3.fpk'); inner=tarfile.open(fileobj=io.BytesIO(o.extractfile('app.tgz').read())); d=inner.extractfile('python/start.sh').read(); print('CRLF:', d.count(b'\r'))"
 > ```
 
 ### 功能
@@ -269,7 +269,10 @@ python mcp_pipe.py 联网查询.py
 
 ## MCP 工具
 
-### `联网查询`
+对外只注册一个工具，名字是 **`webvox-联网搜索`**（`title` = 联网搜索）。
+小智控制台看到的清单就是它，改代码后重启桥接，小智端会重新拉 `tools/list` 自动刷新。
+
+### `webvox-联网搜索`
 
 ```
 参数:
@@ -295,9 +298,13 @@ python mcp_pipe.py 联网查询.py
 
 > 供应商说明：源码 / Docker 版通过环境变量对接智谱 GLM；Windows 源码版通过
 > 浏览器配置页在智谱 / 百炼 / DeepSeek 之间切换；
-> fnOS FPK v1.7.2 通过网页配置页在三者中选择（默认百炼）。
+> fnOS FPK v1.7.3 通过网页配置页在三者中选择（默认百炼）。
 
-### `fetch_url`
+> 命名说明：`webvox-联网搜索` 含中文，不符合 MCP 工具名规范（`^[a-zA-Z0-9_-]{1,64}$`），
+> 启动时会打印一条 SEP-986 告警，**只是警告，不影响调用**。想彻底消除告警，
+> 把 `@mcp.tool(name=...)` 改成纯英文（如 `webvox-search`）即可。
+
+### `fetch_url`（默认下线）
 
 ```
 参数:
@@ -320,6 +327,10 @@ python mcp_pipe.py 联网查询.py
 > DeepSeek Fetch 按成功请求计费（5 元 / 1000 次），Fetch 单独限速 25 QPS。
 > 本地抓取会自动剥除 script/style/nav/header/footer 等标签，只留正文。
 
+> **1.7.3 起默认不注册**：小智控制台只保留「webvox-联网搜索」一个工具。
+> 函数体与配置项都还在 `联网查询.py`，需要恢复时把 `fetch_url` 上方的
+> `# @mcp.tool()` 去掉注释、重启桥接即可。
+
 ### 缓存与用量
 
 - 同一 `provider + 粒度 + 条数 + 查询词 + 域名 + 时间范围` 在「结果缓存时长」内
@@ -338,7 +349,7 @@ python mcp_pipe.py 联网查询.py
 ## 项目结构
 
 ```
-├── 联网查询.py          # MCP Server — 注册联网搜索工具（智谱/百炼/DeepSeek）+ fetch_url 抓页工具
+├── 联网查询.py          # MCP Server — 注册「webvox-联网搜索」（智谱/百炼/DeepSeek）+ fetch_url 抓页（默认下线）
 ├── mcp_pipe.py          # WebSocket 管道 — 连接远程服务器，自动重连
 ├── 启动_main.py          # GUI 配置面板 (tkinter)
 ├── web_config.py        # 浏览器配置页服务端 (stdlib http.server)
@@ -346,7 +357,7 @@ python mcp_pipe.py 联网查询.py
 ├── config_manager.py    # 配置读写 (~/.xiaozhi_mcp_config.json) + API Key DPAPI 加密
 ├── usage.jsonl          # 用量流水（运行时自动生成，不入库）
 ├── requirements.txt     # Python 依赖
-├── fpk/                 # 飞牛 fnOS FPK v1.7.2 打包工程（含 webvox-mcp-1.7.2.fpk）
+├── fpk/                 # 飞牛 fnOS FPK v1.7.3 打包工程（含 webvox-mcp-1.7.3.fpk）
 │   ├── build-fpk.ps1        # 官方 fnpack 打包
 │   └── build-fpk-manual.py  # 无 fnpack 时的手工重建脚本
 └── .env.example         # 环境变量模板
